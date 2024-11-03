@@ -1,56 +1,74 @@
 import streamlit as st
+from transformers import pipeline
+qa_pipeline = pipeline("question-answering", model="distilbert/distilbert-base-cased-distilled-squad")
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import pandas as pd
+from difflib import get_close_matches
 from openai import OpenAI
 
 # Show title and description.
-st.title("💬 Chatbot")
+st.title("💬 FAQ for Yonsei International Summer School")
 st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+    "👋 Welcome to the YISS Chatbot!"
+    "Feel free to ask me anything."
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Google Sheets API 인증 및 데이터 로드 함수
+def load_qa_data():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name("yiss-3535-2f95e38683f7.json", scope)
+    client = gspread.authorize(creds)
+    sheet = client.open("YISS_FAQ").sheet1  # 스프레드시트 이름으로 불러옴
+    qa_data = pd.DataFrame(sheet.get_all_records())
+    return qa_data['Question'].tolist(), qa_data['Answer'].tolist()
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+# Hugging Face의 QA 모델 로드
+qa_pipeline = pipeline("question-answering")
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# 초기 데이터 로드
+questions, answers = load_qa_data()
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+def find_best_answer(user_input):
+    # 가장 유사한 질문 찾기
+    matches = get_close_matches(user_input, questions, n=1, cutoff=0.5)
+    if matches:
+        best_match = matches[0]
+        answer_index = questions.index(best_match)
+        return f"{answers[answer_index]} 🦅 I hope the information provided was helpful for you! Feel free to let us know if you need further assistance."
+    else:
+        return "I'm sorry I couldn't fully address your question here. Please email us to summer@yonsei.ac.kr with more details so we can assist further. We'll do our best to improve, so that we can assist you better in the future! 🦅"
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# Streamlit 앱 설정
+st.title("FAQ for Yonsei International Summer School")
+st.write("👋 Welcome to the YISS Chatbot! Feel free to ask me anything.")
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+# 세션 상태를 사용하여 질문과 답변 리스트 저장
+if 'qa_pairs' not in st.session_state:
+    st.session_state.qa_pairs = []
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+# 새로고침 버튼
+if st.button("Refresh Data"):
+    questions, answers = load_qa_data()
+    st.write("The Q&A data has been updated!")
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# 이전 질문 삭제 버튼
+if st.button("Delete Previous Questions"):  # 버튼 제목
+    st.session_state.qa_pairs = []  # 질문과 답변 리스트 초기화
+    st.write("Previous questions have been cleared!")  # 확인 메시지
+
+# 질문 입력
+user_input = st.text_input("Ask me anything:")
+if st.button("Ask"):
+    if user_input:  # 사용자가 질문을 입력했는지 확인
+        answer = find_best_answer(user_input)
+        st.session_state.qa_pairs.append((user_input, answer))  # 질문과 답변 저장
+    else:
+        st.warning("Please enter a question before clicking 'Ask'.")  # 질문 입력 안내
+
+# 이전 질문과 답변 표시
+if st.session_state.qa_pairs:
+    st.write("### Previous Questions and Answers:")
+    for q, a in st.session_state.qa_pairs:
+        st.write(f"**Q:** {q}")
+        st.write(f"**A:** {a}")
