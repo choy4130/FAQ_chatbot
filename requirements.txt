@@ -3,4 +3,3 @@ transformers
 gspread
 oauth2client
 pandas
-difflib
