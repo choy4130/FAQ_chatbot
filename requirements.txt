@@ -1,2 +1,6 @@
 streamlit
-openai
+transformers
+gspread
+oauth2client
+pandas
+difflib
